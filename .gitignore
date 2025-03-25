@@ -1,0 +1,26 @@
+# Virtual environment
+venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs and temp files
+*.log
+*.pid
+*.tmp
+
+# macOS cruft
+.DS_Store
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
