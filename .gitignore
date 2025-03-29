@@ -10,6 +10,7 @@ __pycache__/
 *.log
 *.pid
 *.tmp
+.env
 
 # macOS cruft
 .DS_Store
