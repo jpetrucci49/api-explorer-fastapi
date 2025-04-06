@@ -7,6 +7,8 @@ import logging
 from datetime import datetime
 from typing import Dict
 from fastapi.responses import JSONResponse
+import redis
+import json
 
 app = FastAPI()
 
@@ -14,7 +16,6 @@ load_dotenv()
 GITHUB_API_URL = "https://api.github.com/users"
 TOKEN = os.getenv("GITHUB_TOKEN")
 PORT = int(os.getenv("PORT", 3002))
-CACHE_TTL = 30 * 60
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +23,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-cache: Dict[str, Dict[str, any]] = {}
+redis_client = redis.Redis(host=f"{os.getenv('REDIS_HOST')}", port=int(os.getenv("REDIS_PORT")), password=f"{os.getenv('REDIS_PASSWORD')}", decode_responses=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,10 +46,10 @@ def with_logging(endpoint):
 @with_logging
 async def get_github_user(request: Request, username: str):
     cache_key = f"github:{username}"
-    cached = cache.get(cache_key)
-    if cached and (datetime.now() - cached["timestamp"]).total_seconds() < CACHE_TTL:
+    cached = redis_client.get(cache_key)
+    if cached:
         return JSONResponse(
-            content=cached["data"],
+            content=json.loads(cached),
             headers={
                 "X-Cache": "HIT",
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -65,7 +66,7 @@ async def get_github_user(request: Request, username: str):
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail="GitHub API error")
             data = response.json()
-            cache[cache_key] = {"data": data, "timestamp": datetime.now()}
+            redis_client.setex(cache_key, 1800, json.dumps(data))
             return JSONResponse(
                 content=data,
                 headers={
