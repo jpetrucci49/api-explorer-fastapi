@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import logging
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 from fastapi.responses import JSONResponse
 import redis
 import json
@@ -35,22 +35,22 @@ common_headers = {
     "Content-Type": "application/json",
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Access-Control-Allow-Origin": "http://localhost:3000",
-    "Access-Control-Allow-Methods": "GET",
+    "Access-Control-Allow-Methods": "GET, POST",
     "Access-Control-Allow-Headers": "*"
 }
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
-    allow_methods=["GET"],
+    allow_methods=["GET, POST"],
     allow_headers=["*"],
     expose_headers=["X-Cache"]
 )
 
 def with_logging(endpoint):
-    async def wrapper(request: Request, username: str):
+    async def wrapper(request: Request, username: Optional[str] = None):
         start = datetime.now()
-        response = await endpoint(request, username)
+        response = await endpoint(request) if username is None else await endpoint(request, username)
         cache_header = response.headers.get("X-Cache", "")
         duration = (datetime.now() - start).total_seconds() * 1000
         logger.info(f"{request.method} {request.url.path}{request.url.query and '?' + request.url.query} {response.status_code} {cache_header} - {duration:.0f}ms")
@@ -142,3 +142,15 @@ async def analyze(request: Request, username: str):
         raise HTTPException(status_code=e.response.status_code, detail="GitHub API error")
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to analyze profile")
+
+@app.post("/clear-cache")
+@with_logging
+async def clear_cache(request: Request):
+    try:
+        redis_client.flushdb()
+        return JSONResponse(
+            content={"detail": "Cache cleared successfully"},
+            headers=common_headers
+        )
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail="Failed to clear cache")
