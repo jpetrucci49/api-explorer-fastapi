@@ -63,7 +63,6 @@ async def fetch_github(url: str) -> Dict:
             url,
             headers={"Authorization": f"Bearer {TOKEN}"}
         )
-        response.raise_for_status()
         return response.json()
 
 async def analyze_profile(username: str) -> Dict:
@@ -106,16 +105,33 @@ async def get_github_user(request: Request, username: str):
         )
 
     try:
-        data = await fetch_github(f"{GITHUB_API_URL}/users/{username}")
+        res = await fetch_github(f"{GITHUB_API_URL}/users/{username}")
+        if not res.ok:
+            status = res.status_code
+            detail = "GitHub API error"
+            extra = {}
+            if status == 404:
+                detail = "GitHub user not found"
+            elif status == 429:
+                detail = "GitHub rate limit exceeded"
+                extra = {"remaining": res.headers.get("X-RateLimit-Remaining", "0")}
+            elif status == 400:
+                detail = "Invalid GitHub API request"
+            raise HTTPException(
+                status_code=status,
+                detail={"status": status, "detail": detail, "extra": extra}
+            )
+        data = res.json()
         redis_client.setex(cache_key, 1800, json.dumps(data))
         return JSONResponse(
             content=data,
             headers={**common_headers, "X-Cache": "MISS"}
         )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail="GitHub API error")
     except httpx.RequestError:
-        raise HTTPException(status_code=500, detail="Failed to reach GitHub")
+        raise HTTPException(
+            status_code=500,
+            detail={"status": 500, "detail": "Network error contacting GitHub", "extra": {}}
+        )
 
 @app.get("/analyze")
 @with_logging
@@ -132,16 +148,33 @@ async def analyze(request: Request, username: str):
         )
 
     try:
+        res = await fetch_github(f"{GITHUB_API_URL}/users/{username}")
+        if not res.ok:
+            status = res.status_code
+            detail = "GitHub API error"
+            extra = {}
+            if status == 404:
+                detail = "GitHub user not found"
+            elif status == 429:
+                detail = "GitHub rate limit exceeded"
+                extra = {"remaining": res.headers.get("X-RateLimit-Remaining", "0")}
+            elif status == 400:
+                detail = "Invalid GitHub API request"
+            raise HTTPException(
+                status_code=status,
+                detail={"status": status, "detail": detail, "extra": extra}
+            )
         analysis = await analyze_profile(username)
         redis_client.setex(cache_key, 1800, json.dumps(analysis))
         return JSONResponse(
             content=analysis,
             headers={**common_headers, "X-Cache": "MISS"}
         )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail="GitHub API error")
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to analyze profile")
+    except httpx.RequestError:
+        raise HTTPException(
+            status_code=500,
+            detail={"status": 500, "detail": "Network error analyzing profile", "extra": {}}
+        )
 
 @app.post("/clear-cache")
 @with_logging
@@ -152,5 +185,8 @@ async def clear_cache(request: Request):
             content={"detail": "Cache cleared successfully"},
             headers=common_headers
         )
-    except redis.RedisError as e:
-        raise HTTPException(status_code=500, detail="Failed to clear cache")
+    except redis.RedisError:
+        raise HTTPException(
+            status_code=500,
+            detail={"status": 500, "detail": "Redis connection failed", "extra": {}}
+        )
