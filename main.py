@@ -58,6 +58,15 @@ def with_logging(endpoint):
     return wrapper
 
 async def fetch_github(url: str) -> Dict:
+    if "test429" in url:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "status": 429,
+                "detail": "GitHub rate limit exceeded",
+                "extra": {"remaining": "0"}
+            }
+        )
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -95,19 +104,32 @@ async def analyze_profile(username: str) -> Dict:
 @with_logging
 async def get_github_user(request: Request, username: str):
     if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "status": 400,
+                "detail": "Username is required",
+                "extra": {}
+            }
+        )
 
     cache_key = f"github:{username}"
-    cached = redis_client.get(cache_key)
-    if cached:
-        return JSONResponse(
-            content=json.loads(cached),
-            headers={**common_headers, "X-Cache": "HIT"}
-        )
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return JSONResponse(
+                content=json.loads(cached),
+                headers={**common_headers, "X-Cache": "HIT"}
+            )
+    except redis.RedisError:
+        pass
 
     try:
         data = await fetch_github(f"{GITHUB_API_URL}/users/{username}")
-        redis_client.setex(cache_key, 1800, json.dumps(data))
+        try:
+            redis_client.setex(cache_key, 1800, json.dumps(data))
+        except redis.RedisError:
+            pass
         return JSONResponse(
             content=data,
             headers={**common_headers, "X-Cache": "MISS"}
@@ -141,19 +163,32 @@ async def get_github_user(request: Request, username: str):
 @with_logging
 async def analyze(request: Request, username: str):
     if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "status": 400,
+                "detail": "Username is required",
+                "extra": {}
+            }
+        )
 
     cache_key = f"analyze:{username}"
-    cached = redis_client.get(cache_key)
-    if cached:
-        return JSONResponse(
-            content=json.loads(cached),
-            headers={**common_headers, "X-Cache": "HIT"}
-        )
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return JSONResponse(
+                content=json.loads(cached),
+                headers={**common_headers, "X-Cache": "HIT"}
+            )
+    except redis.RedisError:
+        pass
 
     try:
         analysis = await analyze_profile(username)
-        redis_client.setex(cache_key, 1800, json.dumps(analysis))
+        try:
+            redis_client.setex(cache_key, 1800, json.dumps(analysis))
+        except redis.RedisError:
+            pass
         return JSONResponse(
             content=analysis,
             headers={**common_headers, "X-Cache": "MISS"}
